@@ -27,11 +27,15 @@ const respawnButton = document.querySelector("#respawn-button");
 const splitButton = document.querySelector("#split-button");
 const feedButton = document.querySelector("#feed-button");
 const finalMass = document.querySelector("#final-mass");
+const finalRank = document.querySelector("#final-rank");
 const hud = document.querySelector("#hud");
 const massValue = document.querySelector("#mass-value");
 const rankValue = document.querySelector("#rank-value");
 const cellValue = document.querySelector("#cell-value");
 const leaderboard = document.querySelector("#leaderboard");
+const cheatPanel = document.querySelector("#cheat-panel");
+const cheatClose = document.querySelector("#cheat-close");
+const cheatButtons = [...document.querySelectorAll("[data-cheat]")];
 
 const BOT_NAMES = [
   "Byte", "Mochi", "Nova", "Pixel", "Orbit", "Boba", "Mango", "Noodle", "Pico",
@@ -50,9 +54,17 @@ let width = window.innerWidth;
 let height = window.innerHeight;
 let dpr = Math.min(2, window.devicePixelRatio || 1);
 let running = false;
+let arenaInitialized = false;
 let lastTime = performance.now();
 let zoom = 1;
 let leaderboardClock = 0;
+let lastPlayerRank = BOT_COUNT + 1;
+let lastPlayerMass = START_MASS;
+
+const cheatState = {
+  godMode: false,
+  freezeBots: false
+};
 
 const pointer = { x: width / 2, y: height / 2 };
 const food = Array.from({ length: FOOD_COUNT }, () => new Food());
@@ -101,7 +113,22 @@ function resetArena() {
 
   const name = (playerNameInput.value || "Blob").trim().slice(0, 18) || "Blob";
   player.reset({ name, mass: START_MASS, color: "#9cff57" });
+  arenaInitialized = true;
+  lastPlayerMass = START_MASS;
   zoom = 1;
+  pointer.x = width / 2;
+  pointer.y = height / 2;
+  updateHud();
+}
+
+function respawnPlayer() {
+  const name = (playerNameInput.value || player.name || "Blob").trim().slice(0, 18) || "Blob";
+  player.reset({ name, mass: START_MASS, color: "#9cff57" });
+  running = true;
+  lastTime = performance.now();
+  lastPlayerMass = START_MASS;
+  deathScreen.hidden = true;
+  hud.hidden = false;
   pointer.x = width / 2;
   pointer.y = height / 2;
   updateHud();
@@ -120,7 +147,11 @@ function startGame() {
 function endGame() {
   if (!running) return;
   running = false;
-  finalMass.textContent = Math.round(player.totalMass).toLocaleString();
+  finalMass.textContent = Math.round(lastPlayerMass).toLocaleString();
+  finalRank.textContent = `#${lastPlayerRank}`;
+  massValue.textContent = Math.round(lastPlayerMass).toLocaleString();
+  rankValue.textContent = `#${lastPlayerRank}`;
+  cellValue.textContent = "0";
   deathScreen.hidden = false;
 }
 
@@ -253,10 +284,13 @@ function resolveBlobCollisions() {
         for (const b of [...actorB.cells]) {
           if (!actorB.cells.includes(b)) continue;
 
-          if (canEat(a, b)) {
+          const canEatB = !(actorB === player && cheatState.godMode) && canEat(a, b);
+          const canEatA = !(actorA === player && cheatState.godMode) && canEat(b, a);
+
+          if (canEatB) {
             a.grow(b.mass * 0.82);
             actorB.removeCell(b);
-          } else if (canEat(b, a)) {
+          } else if (canEatA) {
             b.grow(a.mass * 0.82);
             actorA.removeCell(a);
             break;
@@ -297,10 +331,12 @@ function update(deltaMs, now) {
   player.update(deltaMs, target.x, target.y, now);
 
   const actors = getActors();
-  for (const bot of bots) {
-    const center = bot.center;
-    const nearbyFood = foodGrid.queryCircle(center.x, center.y, BOT_FOOD_SCAN_RADIUS);
-    bot.updateAI(nearbyFood, actors, viruses, deltaMs, now);
+  if (!cheatState.freezeBots) {
+    for (const bot of bots) {
+      const center = bot.center;
+      const nearbyFood = foodGrid.queryCircle(center.x, center.y, BOT_FOOD_SCAN_RADIUS);
+      bot.updateAI(nearbyFood, actors, viruses, deltaMs, now);
+    }
   }
   for (const virus of viruses) virus.update(deltaMs);
 
@@ -308,6 +344,8 @@ function update(deltaMs, now) {
   for (const actor of actors) consumeFood(actor);
   resolveVirusCollisions(now);
   resolveBlobCollisions();
+
+  if (!player.alive) return;
 
   const targetZoom = calculateCameraZoom();
   zoom += (targetZoom - zoom) * Math.min(1, deltaMs * 0.0045);
@@ -324,10 +362,17 @@ function updateHud() {
     .filter((actor) => actor.alive)
     .sort((a, b) => b.totalMass - a.totalMass);
 
-  const playerRank = Math.max(1, ranking.indexOf(player) + 1);
-  massValue.textContent = Math.round(player.totalMass).toLocaleString();
-  rankValue.textContent = `#${playerRank}`;
-  cellValue.textContent = player.cells.length.toString();
+  if (player.alive) {
+    lastPlayerRank = Math.max(1, ranking.indexOf(player) + 1);
+    lastPlayerMass = player.totalMass;
+    massValue.textContent = Math.round(player.totalMass).toLocaleString();
+    rankValue.textContent = `#${lastPlayerRank}`;
+    cellValue.textContent = player.cells.length.toString();
+  } else {
+    massValue.textContent = Math.round(lastPlayerMass).toLocaleString();
+    rankValue.textContent = `#${lastPlayerRank}`;
+    cellValue.textContent = "0";
+  }
 
   leaderboard.replaceChildren();
   ranking.slice(0, 8).forEach((actor) => {
@@ -445,13 +490,68 @@ function updatePointer(event) {
   pointer.y = event.clientY;
 }
 
+function setCheatToggle(name, active) {
+  cheatState[name] = active;
+  const button = cheatButtons.find((item) => item.dataset.cheat === name);
+  if (!button) return;
+  button.classList.toggle("is-active", active);
+  const status = button.querySelector("[data-state]");
+  if (status) status.textContent = active ? "ON" : "OFF";
+}
+
+function toggleCheatPanel(force) {
+  const shouldOpen = typeof force === "boolean" ? force : cheatPanel.hidden;
+  cheatPanel.hidden = !shouldOpen;
+}
+
+function addMass(amount) {
+  if (!player.alive || !player.largestCell) return;
+  player.largestCell.grow(amount);
+  lastPlayerMass = player.totalMass;
+  updateHud();
+}
+
+function teleportPlayerToCenter() {
+  if (!player.alive || !player.cells.length) return;
+  const center = player.center;
+  const dx = WORLD_WIDTH / 2 - center.x;
+  const dy = WORLD_HEIGHT / 2 - center.y;
+  for (const cell of player.cells) {
+    cell.x += dx;
+    cell.y += dy;
+  }
+}
+
+function runCheat(action) {
+  if (action === "mass100") addMass(100);
+  else if (action === "mass1000") addMass(1000);
+  else if (action === "mass10000") addMass(10000);
+  else if (action === "godMode") setCheatToggle("godMode", !cheatState.godMode);
+  else if (action === "freezeBots") setCheatToggle("freezeBots", !cheatState.freezeBots);
+  else if (action === "center") teleportPlayerToCenter();
+}
+
 window.addEventListener("resize", resize);
 canvas.addEventListener("pointermove", updatePointer);
 canvas.addEventListener("pointerdown", updatePointer);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 document.addEventListener("keydown", (event) => {
-  if (!running || event.repeat) return;
+  if (event.repeat) return;
+
+  if (event.code === "Insert" || event.key === "Insert") {
+    event.preventDefault();
+    toggleCheatPanel();
+    return;
+  }
+
+  if (event.code === "Escape" && !cheatPanel.hidden) {
+    event.preventDefault();
+    toggleCheatPanel(false);
+    return;
+  }
+
+  if (!running) return;
 
   if (event.code === "Space") {
     event.preventDefault();
@@ -474,12 +574,21 @@ feedButton.addEventListener("pointerdown", (event) => {
   feedPlayer();
 });
 
+cheatClose.addEventListener("click", () => toggleCheatPanel(false));
+cheatPanel.addEventListener("pointerdown", (event) => event.stopPropagation());
+for (const button of cheatButtons) {
+  button.addEventListener("click", () => runCheat(button.dataset.cheat));
+}
+
 startForm.addEventListener("submit", (event) => {
   event.preventDefault();
   startGame();
 });
 
-respawnButton.addEventListener("click", startGame);
+respawnButton.addEventListener("click", () => {
+  if (!arenaInitialized) resetArena();
+  respawnPlayer();
+});
 
 document.addEventListener("visibilitychange", () => {
   lastTime = performance.now();

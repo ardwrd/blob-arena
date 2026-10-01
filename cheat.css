@@ -1,0 +1,115 @@
+.cheat-panel {
+  position: fixed;
+  top: 50%;
+  left: 22px;
+  z-index: 40;
+  width: min(340px, calc(100vw - 44px));
+  transform: translateY(-50%);
+  padding: 18px;
+  border: 1px solid rgba(156, 255, 87, .32);
+  background: rgba(8, 14, 28, .96);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .52);
+  backdrop-filter: blur(14px);
+  color: #f7f8fb;
+  pointer-events: auto;
+}
+
+.cheat-panel[hidden] { display: none !important; }
+
+.cheat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.cheat-eyebrow {
+  margin: 0 0 3px;
+  color: #9cff57;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .16em;
+}
+
+.cheat-header h2 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -.04em;
+}
+
+.cheat-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,.15);
+  background: transparent;
+  color: #f7f8fb;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.cheat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.cheat-grid button {
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.13);
+  background: #10182c;
+  color: #f7f8fb;
+  text-align: left;
+}
+
+.cheat-grid button:hover {
+  border-color: rgba(156,255,87,.7);
+  background: #15203a;
+}
+
+.cheat-grid button.is-active {
+  border-color: #9cff57;
+  box-shadow: inset 3px 0 0 #9cff57;
+}
+
+.cheat-grid b {
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+
+.cheat-grid span {
+  color: #9ba8c7;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.cheat-grid button.is-active span { color: #9cff57; }
+
+.cheat-note {
+  margin: 13px 0 0;
+  color: #74809c;
+  font-size: 9px;
+}
+
+.cheat-note kbd {
+  font-family: inherit;
+  color: #c7d1e8;
+}
+
+@media (max-width: 620px) {
+  .cheat-panel {
+    top: auto;
+    bottom: 104px;
+    left: 12px;
+    width: calc(100vw - 24px);
+    transform: none;
+  }
+}

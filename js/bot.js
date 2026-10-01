@@ -1,6 +1,7 @@
 import { BlobActor } from "./player.js";
 import {
   MAX_CELLS,
+  SPLIT_MIN_MASS,
   VIRUS_TRIGGER_MASS,
   WORLD_HEIGHT,
   WORLD_WIDTH,
@@ -11,6 +12,8 @@ import {
 
 const FOOD_BINS = 12;
 const MEMORY_TTL = 1800;
+const FRIEND_MIN_DURATION = 9000;
+const FRIEND_MAX_DURATION = 18000;
 
 export class Bot extends BlobActor {
   constructor(options = {}) {
@@ -36,6 +39,14 @@ export class Bot extends BlobActor {
     this.aggression = randomRange(0.84, 1.18);
     this.caution = randomRange(0.9, 1.22);
     this.greed = randomRange(0.9, 1.15);
+    this.sociability = randomRange(0.72, 1.28);
+
+    // Social memory. Bots can temporarily ally, orbit one another and perform split dances.
+    this.friendActorId = null;
+    this.friendUntil = 0;
+    this.socialCheckAt = randomRange(1200, 3600);
+    this.nextDanceAt = randomRange(3000, 7000);
+    this.danceDirection = Math.random() < 0.5 ? -1 : 1;
   }
 
   reset(options = {}) {
@@ -50,6 +61,11 @@ export class Bot extends BlobActor {
     this.targetActorId = null;
     this.targetLockUntil = 0;
     this.actorMemory?.clear();
+    this.friendActorId = null;
+    this.friendUntil = 0;
+    this.socialCheckAt = performance.now() + randomRange(1400, 3800);
+    this.nextDanceAt = performance.now() + randomRange(2800, 7200);
+    this.danceDirection = Math.random() < 0.5 ? -1 : 1;
   }
 
   setDesiredVector(x, y, magnitude = 260) {
@@ -114,7 +130,199 @@ export class Bot extends BlobActor {
     return { x, y, strength: Math.hypot(x, y) };
   }
 
-  evaluateThreats(actors, viruses, observations) {
+  clearFriend() {
+    this.friendActorId = null;
+    this.friendUntil = 0;
+  }
+
+  isFriendlyWith(actor, now) {
+    if (!actor || this.friendActorId !== actor.id || now >= this.friendUntil) return false;
+    if (!actor.alive || !this.alive) return false;
+
+    // Alliances naturally break if one side becomes overwhelmingly larger.
+    const ratio = this.totalMass / Math.max(1, actor.totalMass);
+    return ratio > 0.38 && ratio < 2.65;
+  }
+
+  befriend(actor, now, duration = randomRange(FRIEND_MIN_DURATION, FRIEND_MAX_DURATION)) {
+    if (!actor || actor === this || !actor.alive) return false;
+
+    this.friendActorId = actor.id;
+    this.friendUntil = now + duration;
+    this.targetActorId = null;
+    this.targetLockUntil = 0;
+    this.state = "social";
+    this.nextDanceAt = Math.max(this.nextDanceAt, now + randomRange(1800, 4200));
+
+    // Bot-to-bot friendships are reciprocal so both sides stop treating each other as prey.
+    if (actor instanceof Bot) {
+      const partnerBusy = actor.friendActorId && actor.friendActorId !== this.id && now < actor.friendUntil;
+      if (!partnerBusy) {
+        actor.friendActorId = this.id;
+        actor.friendUntil = Math.max(actor.friendUntil, now + duration);
+        actor.targetActorId = null;
+        actor.targetLockUntil = 0;
+        actor.nextDanceAt = Math.max(actor.nextDanceAt, now + randomRange(2200, 4800));
+      }
+    }
+
+    return true;
+  }
+
+  getFriend(actors, now) {
+    if (!this.friendActorId || now >= this.friendUntil) {
+      this.clearFriend();
+      return null;
+    }
+
+    const friend = actors.find((actor) => actor.id === this.friendActorId && actor.alive);
+    if (!friend || !this.isFriendlyWith(friend, now)) {
+      this.clearFriend();
+      return null;
+    }
+
+    const distance = Math.hypot(friend.center.x - this.center.x, friend.center.y - this.center.y);
+    if (distance > 1650) {
+      this.clearFriend();
+      return null;
+    }
+
+    return friend;
+  }
+
+  tryFindFriend(actors, now) {
+    if (now < this.socialCheckAt || this.friendActorId) return null;
+    this.socialCheckAt = now + randomRange(2600, 5200) / this.sociability;
+
+    let candidate = null;
+    let bestScore = -Infinity;
+
+    for (const other of actors) {
+      if (!(other instanceof Bot) || other === this || !other.alive || !other.largestCell) continue;
+
+      const dx = other.center.x - this.center.x;
+      const dy = other.center.y - this.center.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 150 || distance > 620) continue;
+
+      const ratio = other.totalMass / Math.max(1, this.totalMass);
+      if (ratio < 0.58 || ratio > 1.72) continue;
+
+      const massSimilarity = 1 - Math.min(1, Math.abs(Math.log(ratio)) / 0.55);
+      const proximity = 1 - distance / 620;
+      const otherFree = !other.friendActorId || now >= other.friendUntil;
+      const score = massSimilarity * 1.4 + proximity * 1.1 + (otherFree ? 0.45 : -0.5);
+
+      if (score > bestScore) {
+        bestScore = score;
+        candidate = other;
+      }
+    }
+
+    if (!candidate) return null;
+
+    // Not every compatible encounter becomes an alliance; personality controls frequency.
+    const chance = Math.min(0.72, 0.28 * this.sociability + Math.max(0, bestScore - 1.35) * 0.18);
+    if (Math.random() > chance) return null;
+
+    this.befriend(candidate, now);
+    return candidate;
+  }
+
+  runSocialBehavior(friend, actors, viruses, now) {
+    if (!friend || !friend.alive || !this.largestCell) return false;
+
+    const center = this.center;
+    const friendCenter = friend.center;
+    const dx = friendCenter.x - center.x;
+    const dy = friendCenter.y - center.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const direction = normalize(dx, dy);
+
+    // If separated, regroup first. This makes allied bots visibly travel together.
+    if (distance > 560) {
+      this.state = "rejoin";
+      this.setDesiredVector(dx, dy, 290);
+      return true;
+    }
+
+    const largest = this.largestCell;
+    const friendLargest = friend.largestCell;
+    const safeSplit =
+      friendLargest &&
+      largest.mass >= SPLIT_MIN_MASS * 1.45 &&
+      this.cells.length <= 2 &&
+      now >= this.splitCooldownUntil &&
+      now >= this.nextDanceAt &&
+      distance > 145 &&
+      distance < 390;
+
+    if (safeSplit) {
+      // Split tangentially instead of directly into the friend: this creates an Agar-style "split dance".
+      const tangentX = -direction.y * this.danceDirection;
+      const tangentY = direction.x * this.danceDirection;
+      const outwardX = -direction.x * 0.28;
+      const outwardY = -direction.y * 0.28;
+      const splitX = tangentX + outwardX;
+      const splitY = tangentY + outwardY;
+
+      // Do not dance-split into a dangerous virus or a much larger third party.
+      let unsafe = false;
+      const projected = {
+        x: center.x + splitX * 210,
+        y: center.y + splitY * 210
+      };
+
+      for (const virus of viruses) {
+        if (largest.mass / 2 >= VIRUS_TRIGGER_MASS && distanceSquared(projected, virus) < 210 * 210) {
+          unsafe = true;
+          break;
+        }
+      }
+
+      if (!unsafe) {
+        for (const other of actors) {
+          if (other === this || other === friend || !other.alive || !other.largestCell) continue;
+          if (other.largestCell.mass < largest.mass * 0.62) continue;
+          if (distanceSquared(projected, other.center) < 360 * 360) {
+            unsafe = true;
+            break;
+          }
+        }
+      }
+
+      if (!unsafe && this.split(splitX, splitY, now)) {
+        this.state = "dance-split";
+        this.splitCooldownUntil = now + randomRange(3300, 4700);
+        this.nextDanceAt = now + randomRange(6500, 11000) / this.sociability;
+        this.danceDirection *= -1;
+
+        // Encourage the partner to answer the dance shortly afterward rather than simultaneously.
+        if (friend instanceof Bot) {
+          friend.nextDanceAt = Math.min(friend.nextDanceAt, now + randomRange(650, 1250));
+          friend.danceDirection = -this.danceDirection;
+        }
+      }
+    }
+
+    // Orbit the friend with a soft radial correction. It reads as playful teaming rather than collision jitter.
+    const combinedRadius = (largest?.radius || 30) + (friendLargest?.radius || 30);
+    const preferredDistance = Math.max(185, Math.min(320, combinedRadius + 95));
+    const radialError = (distance - preferredDistance) / preferredDistance;
+    const tangentX = -direction.y * this.danceDirection;
+    const tangentY = direction.x * this.danceDirection;
+    const edge = this.getEdgeRepulsion(center);
+
+    this.state = this.state === "dance-split" ? this.state : "social";
+    this.setDesiredVector(
+      tangentX * 1.05 + direction.x * radialError * 1.65 + edge.x * 1.4,
+      tangentY * 1.05 + direction.y * radialError * 1.65 + edge.y * 1.4,
+      245
+    );
+    return true;
+  }
+
+  evaluateThreats(actors, viruses, observations, now) {
     const center = this.center;
     const largest = this.largestCell;
     let escapeX = 0;
@@ -129,6 +337,7 @@ export class Bot extends BlobActor {
 
     for (const other of actors) {
       if (other === this || !other.alive || !other.largestCell) continue;
+      if (this.isFriendlyWith(other, now)) continue;
 
       const enemyLargest = other.largestCell;
       const ratio = enemyLargest.mass / Math.max(1, largest.mass);
@@ -217,6 +426,7 @@ export class Bot extends BlobActor {
 
     for (const other of actors) {
       if (other === this || !other.alive || !other.largestCell) continue;
+      if (this.isFriendlyWith(other, now)) continue;
 
       const preyCell = other.largestCell;
       const massRatio = largest.mass / Math.max(1, preyCell.mass);
@@ -264,6 +474,7 @@ export class Bot extends BlobActor {
     // Do not throw half our mass into a nearby larger enemy.
     for (const other of actors) {
       if (other === this || other === prey.actor || !other.alive || !other.largestCell) continue;
+      if (this.isFriendlyWith(other, now)) continue;
       if (other.largestCell.mass < largest.mass * 0.58) continue;
       if (distanceSquared(other.center, prey.predicted) < 430 * 430) return false;
     }
@@ -329,8 +540,10 @@ export class Bot extends BlobActor {
     }
     this.pruneMemory(now);
 
-    const danger = this.evaluateThreats(actors, viruses, observations);
+    const friend = this.getFriend(actors, now) || this.tryFindFriend(actors, now);
+    const danger = this.evaluateThreats(actors, viruses, observations, now);
 
+    // Survival still outranks friendship. A dancing bot should stop dancing when danger appears.
     if (danger.dangerScore > 0.72) {
       const cover = this.findVirusCover(viruses, danger.nearestThreat);
 
@@ -346,6 +559,8 @@ export class Bot extends BlobActor {
       this.setDesiredVector(danger.escapeX, danger.escapeY, 390);
       return;
     }
+
+    if (friend && this.runSocialBehavior(friend, actors, viruses, now)) return;
 
     const prey = this.findBestPrey(actors, observations, now);
     if (prey && prey.score > 1.85) {
@@ -398,13 +613,14 @@ export class Bot extends BlobActor {
 
     this.decisionTimer -= deltaMs;
     if (this.decisionTimer <= 0) {
-      const urgency = this.state === "flee" || this.state === "hunt" ? 0.72 : 1;
+      const urgentStates = new Set(["flee", "hunt", "split-hunt", "dance-split"]);
+      const urgency = urgentStates.has(this.state) ? 0.72 : 1;
       this.decisionTimer = randomRange(135, 235) * urgency;
       this.chooseDirection(food, actors, viruses, deltaMs, now);
     }
 
     // Smooth steering gives the bot intent without making movement look robotic.
-    const response = this.state === "flee" ? 72 : this.state === "hunt" ? 88 : 125;
+    const response = this.state === "flee" ? 72 : this.state === "hunt" || this.state === "dance-split" ? 88 : 125;
     const blend = 1 - Math.exp(-deltaMs / response);
     this.steerX += (this.desiredX - this.steerX) * blend;
     this.steerY += (this.desiredY - this.steerY) * blend;

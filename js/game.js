@@ -2,6 +2,7 @@ import { Bot } from "./bot.js";
 import { EjectedMass } from "./ejected.js";
 import { Food } from "./food.js";
 import { Player } from "./player.js";
+import { SpatialGrid } from "./spatial.js";
 import { Virus } from "./virus.js";
 import {
   START_MASS,
@@ -38,10 +39,12 @@ const BOT_NAMES = [
   "Yuzu", "Kumo", "Sora", "Bean", "Puff", "Ringo", "Koda", "Mika"
 ];
 
-const FOOD_COUNT = 2200;
-const BOT_COUNT = 26;
-const VIRUS_COUNT = 30;
+const FOOD_COUNT = 8000;
+const BOT_COUNT = 200;
+const VIRUS_COUNT = 40;
 const MAX_EJECTED = 240;
+const FOOD_GRID_SIZE = 320;
+const BOT_FOOD_SCAN_RADIUS = 760;
 
 let width = window.innerWidth;
 let height = window.innerHeight;
@@ -53,16 +56,21 @@ let leaderboardClock = 0;
 
 const pointer = { x: width / 2, y: height / 2 };
 const food = Array.from({ length: FOOD_COUNT }, () => new Food());
+const foodGrid = new SpatialGrid(FOOD_GRID_SIZE);
 const bots = [];
 const viruses = [];
 const ejectedMasses = [];
 const player = new Player({ name: "Blob", isHuman: true, color: "#9cff57" });
 
+foodGrid.rebuild(food);
+
 function createBots() {
   bots.length = 0;
   for (let i = 0; i < BOT_COUNT; i += 1) {
+    const baseName = BOT_NAMES[i % BOT_NAMES.length];
+    const cycle = Math.floor(i / BOT_NAMES.length);
     bots.push(new Bot({
-      name: BOT_NAMES[i % BOT_NAMES.length],
+      name: cycle ? `${baseName} ${cycle + 1}` : baseName,
       mass: randomRange(30, 120),
       color: randomColor()
     }));
@@ -86,6 +94,7 @@ function resize() {
 
 function resetArena() {
   for (const pellet of food) pellet.reset();
+  foodGrid.rebuild(food);
   ejectedMasses.length = 0;
   createBots();
   createViruses();
@@ -150,11 +159,15 @@ function consumeFood(actor) {
   for (const cell of actor.cells) {
     const reach = cell.radius + 7;
     const reach2 = reach * reach;
+    const nearbyFood = foodGrid.queryCircle(cell.x, cell.y, reach);
 
-    for (const pellet of food) {
+    for (const pellet of nearbyFood) {
       if (distanceSquared(cell, pellet) <= reach2) {
+        const oldX = pellet.x;
+        const oldY = pellet.y;
         cell.grow(pellet.value);
         pellet.reset();
+        foodGrid.relocate(pellet, oldX, oldY);
       }
     }
   }
@@ -284,7 +297,11 @@ function update(deltaMs, now) {
   player.update(deltaMs, target.x, target.y, now);
 
   const actors = getActors();
-  for (const bot of bots) bot.updateAI(food, actors, viruses, deltaMs, now);
+  for (const bot of bots) {
+    const center = bot.center;
+    const nearbyFood = foodGrid.queryCircle(center.x, center.y, BOT_FOOD_SCAN_RADIUS);
+    bot.updateAI(nearbyFood, actors, viruses, deltaMs, now);
+  }
   for (const virus of viruses) virus.update(deltaMs);
 
   updateEjected(deltaMs, now);
@@ -359,7 +376,7 @@ function drawBackground() {
   ctx.strokeStyle = "rgba(156,255,87,.28)";
   ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-  for (const pellet of food) {
+  for (const pellet of foodGrid.queryRect(left, top, right, bottom)) {
     if (pellet.x > left && pellet.x < right && pellet.y > top && pellet.y < bottom) pellet.draw(ctx);
   }
 

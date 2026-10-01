@@ -37,7 +37,7 @@ const BOT_NAMES = [
   "Ziggy", "Luma", "Taro", "Kiwi", "Echo", "Pebble", "Miso", "Toast", "Comet"
 ];
 
-const FOOD_COUNT = 720;
+const FOOD_COUNT = 1200;
 const BOT_COUNT = 18;
 const VIRUS_COUNT = 22;
 const MAX_EJECTED = 240;

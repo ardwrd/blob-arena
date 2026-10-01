@@ -1,20 +1,36 @@
 import { BlobActor } from "./player.js";
-import { VIRUS_TRIGGER_MASS, distanceSquared, randomRange } from "./physics.js";
+import { VIRUS_TRIGGER_MASS, distanceSquared, normalize, randomRange } from "./physics.js";
 
 export class Bot extends BlobActor {
   constructor(options = {}) {
     super(options);
-    this.thinkTimer = 0;
+    this.decisionTimer = 0;
+    this.wanderTimer = 0;
     this.wanderX = randomRange(-1, 1);
     this.wanderY = randomRange(-1, 1);
+    this.desiredX = 0;
+    this.desiredY = 0;
+    this.steerX = 0;
+    this.steerY = 0;
     this.splitCooldownUntil = 0;
   }
 
-  updateAI(food, actors, viruses, deltaMs, now) {
-    if (!this.alive) return;
+  setDesiredVector(x, y, magnitude = 260) {
+    const direction = normalize(x, y);
+    if (!direction.length) {
+      this.desiredX = 0;
+      this.desiredY = 0;
+      return;
+    }
 
+    this.desiredX = direction.x * magnitude;
+    this.desiredY = direction.y * magnitude;
+  }
+
+  chooseDirection(food, actors, viruses, deltaMs, now) {
     const center = this.center;
     const largest = this.largestCell;
+
     let dangerVirus = null;
     let dangerVirusDistance = Infinity;
 
@@ -29,7 +45,7 @@ export class Bot extends BlobActor {
     }
 
     if (dangerVirus) {
-      this.update(deltaMs, center.x - dangerVirus.x, center.y - dangerVirus.y, now);
+      this.setDesiredVector(center.x - dangerVirus.x, center.y - dangerVirus.y, 320);
       return;
     }
 
@@ -54,7 +70,7 @@ export class Bot extends BlobActor {
 
     if (threat) {
       const target = threat.center;
-      this.update(deltaMs, center.x - target.x, center.y - target.y, now);
+      this.setDesiredVector(center.x - target.x, center.y - target.y, 340);
       return;
     }
 
@@ -71,15 +87,15 @@ export class Bot extends BlobActor {
         preyDistance < 330 * 330 &&
         this.cells.length < 8
       ) {
-        if (this.split(dx, dy, now)) this.splitCooldownUntil = now + 3200;
+        if (this.split(dx, dy, now)) this.splitCooldownUntil = now + 3800;
       }
 
-      this.update(deltaMs, dx, dy, now);
+      this.setDesiredVector(dx, dy, 300);
       return;
     }
 
     let nearestFood = null;
-    let nearestFoodDistance = 440 * 440;
+    let nearestFoodDistance = 500 * 500;
 
     for (const pellet of food) {
       const d2 = distanceSquared(center, pellet);
@@ -90,17 +106,34 @@ export class Bot extends BlobActor {
     }
 
     if (nearestFood) {
-      this.update(deltaMs, nearestFood.x - center.x, nearestFood.y - center.y, now);
+      this.setDesiredVector(nearestFood.x - center.x, nearestFood.y - center.y, 250);
       return;
     }
 
-    this.thinkTimer -= deltaMs;
-    if (this.thinkTimer <= 0) {
-      this.thinkTimer = randomRange(700, 2200);
+    this.wanderTimer -= deltaMs;
+    if (this.wanderTimer <= 0) {
+      this.wanderTimer = randomRange(900, 2200);
       this.wanderX = randomRange(-1, 1);
       this.wanderY = randomRange(-1, 1);
     }
 
-    this.update(deltaMs, this.wanderX * 180, this.wanderY * 180, now);
+    this.setDesiredVector(this.wanderX, this.wanderY, 220);
+  }
+
+  updateAI(food, actors, viruses, deltaMs, now) {
+    if (!this.alive) return;
+
+    this.decisionTimer -= deltaMs;
+    if (this.decisionTimer <= 0) {
+      this.decisionTimer = randomRange(120, 210);
+      this.chooseDirection(food, actors, viruses, deltaMs, now);
+    }
+
+    // Smooth steering so bots do not snap between food, prey, threats, and viruses.
+    const blend = 1 - Math.exp(-deltaMs / 105);
+    this.steerX += (this.desiredX - this.steerX) * blend;
+    this.steerY += (this.desiredY - this.steerY) * blend;
+
+    this.update(deltaMs, this.steerX, this.steerY, now);
   }
 }

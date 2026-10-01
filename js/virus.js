@@ -18,6 +18,8 @@ export class Virus {
     this.vx = vx;
     this.vy = vy;
     this.feedCount = 0;
+    this.rotation = randomRange(0, Math.PI * 2);
+    this.spin = randomRange(0.0008, 0.00135) * (Math.random() < 0.5 ? -1 : 1);
   }
 
   get radius() {
@@ -31,6 +33,8 @@ export class Virus {
     this.vx = 0;
     this.vy = 0;
     this.feedCount = 0;
+    this.rotation = randomRange(0, Math.PI * 2);
+    this.spin = randomRange(0.0008, 0.00135) * (Math.random() < 0.5 ? -1 : 1);
   }
 
   update(deltaMs) {
@@ -40,6 +44,8 @@ export class Virus {
     const damping = Math.pow(0.92, frameScale);
     this.vx *= damping;
     this.vy *= damping;
+    this.rotation += this.spin * deltaMs;
+
     const r = this.radius;
     this.x = clamp(this.x, r, WORLD_WIDTH - r);
     this.y = clamp(this.y, r, WORLD_HEIGHT - r);
@@ -73,7 +79,7 @@ export class Virus {
     ctx.beginPath();
     for (let i = 0; i < spikes * 2; i += 1) {
       const radius = i % 2 === 0 ? outer : inner;
-      const angle = (Math.PI * i) / spikes;
+      const angle = this.rotation + (Math.PI * i) / spikes;
       const x = this.x + Math.cos(angle) * radius;
       const y = this.y + Math.sin(angle) * radius;
       if (i === 0) ctx.moveTo(x, y);

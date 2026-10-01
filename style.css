@@ -35,7 +35,6 @@ body {
 
 button,
 input { font: inherit; }
-
 button { cursor: pointer; }
 
 #game {
@@ -65,7 +64,7 @@ button { cursor: pointer; }
 .hud[hidden] { display: none !important; }
 
 .panel {
-  width: min(100%, 520px);
+  width: min(100%, 560px);
   padding: clamp(28px, 7vw, 54px);
   background: rgba(13, 20, 38, .94);
   border: 1px solid rgba(255,255,255,.16);
@@ -105,7 +104,7 @@ h2 {
 
 .lede,
 .death-copy {
-  max-width: 440px;
+  max-width: 460px;
   margin-bottom: 28px;
   color: var(--muted);
   font-size: 15px;
@@ -162,6 +161,29 @@ h2 {
 #respawn-button:hover {
   transform: translateY(-2px);
   background: #b6ff82;
+}
+
+.mechanic-notes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.mechanic-notes span {
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.1);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.mechanic-notes b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text);
+  font-size: 9px;
+  letter-spacing: .08em;
 }
 
 .fine-print {
@@ -249,12 +271,70 @@ h2 {
   white-space: nowrap;
 }
 
+.action-controls {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(138px, calc(env(safe-area-inset-bottom) + 122px));
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.action-controls button {
+  min-width: 76px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 0;
+  background: rgba(13,20,38,.88);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  backdrop-filter: blur(8px);
+  touch-action: manipulation;
+}
+
+.action-controls button:hover,
+.action-controls button:active {
+  border-color: var(--accent);
+  background: rgba(28,42,58,.94);
+}
+
+.action-controls span {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+
+.action-controls kbd {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 8px;
+}
+
 @media (max-width: 620px) {
   .panel { padding: 28px 24px; }
   h1 { font-size: clamp(56px, 20vw, 82px); }
   .leaderboard-card { width: 150px; }
   .leaderboard-card li:nth-child(n+6) { display: none; }
   .control-hint { display: none; }
+  .mechanic-notes { grid-template-columns: 1fr; }
+  .mechanic-notes span { padding: 7px 9px; }
+  .action-controls {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(132px, calc(env(safe-area-inset-bottom) + 118px));
+  }
+  .action-controls button {
+    min-width: 64px;
+    height: 48px;
+  }
+  .stats-card {
+    gap: 5px;
+    padding: 10px;
+  }
+  .stats-card strong { font-size: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

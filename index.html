@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Blob Arena is a lightweight browser arena game where blobs grow, hunt, and survive.">
+  <meta name="description" content="Blob Arena is a lightweight browser arena game with splitting, feeding, viruses, bots, and multi-cell movement.">
   <meta name="theme-color" content="#0b1020">
   <title>Blob Arena</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=2">
 </head>
 <body>
   <canvas id="game" aria-label="Blob Arena game canvas"></canvas>
@@ -18,6 +18,9 @@
       <span class="hud-separator">/</span>
       <span class="hud-label">RANK</span>
       <strong id="rank-value">#1</strong>
+      <span class="hud-separator">/</span>
+      <span class="hud-label">CELLS</span>
+      <strong id="cell-value">1</strong>
     </div>
 
     <div class="hud-card leaderboard-card">
@@ -25,14 +28,23 @@
       <ol id="leaderboard"></ol>
     </div>
 
-    <div class="control-hint">Move pointer or touch to steer</div>
+    <div class="control-hint">SPACE split · W feed · green viruses split large cells</div>
+
+    <div class="action-controls" aria-label="Game actions">
+      <button id="feed-button" type="button" aria-label="Feed mass">
+        <span>FEED</span><kbd>W</kbd>
+      </button>
+      <button id="split-button" type="button" aria-label="Split cells">
+        <span>SPLIT</span><kbd>SPACE</kbd>
+      </button>
+    </div>
   </div>
 
   <section class="overlay" id="start-screen">
     <div class="panel">
       <p class="eyebrow">BROWSER ARENA</p>
       <h1>BLOB<br>ARENA</h1>
-      <p class="lede">Eat pellets. Grow bigger. Hunt smaller blobs. Avoid everything larger than you.</p>
+      <p class="lede">Eat pellets. Split to attack. Feed mass with W. Use green viruses as cover when small—and avoid swallowing them when you are large.</p>
 
       <form id="start-form" class="start-form">
         <label for="player-name">Nickname</label>
@@ -40,7 +52,13 @@
         <button type="submit">ENTER ARENA</button>
       </form>
 
-      <p class="fine-print">Single-player V1 · bots only · no account · no server</p>
+      <div class="mechanic-notes" aria-label="Controls">
+        <span><b>SPACE</b> split</span>
+        <span><b>W</b> eject / feed mass</span>
+        <span><b>VIRUS</b> explodes large cells</span>
+      </div>
+
+      <p class="fine-print">Single-player V2 · AI bots · multi-cell gameplay · no account · no server</p>
     </div>
   </section>
 
@@ -53,6 +71,6 @@
     </div>
   </section>
 
-  <script type="module" src="./js/game.js"></script>
+  <script type="module" src="./js/game.js?v=2"></script>
 </body>
 </html>

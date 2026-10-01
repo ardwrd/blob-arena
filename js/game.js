@@ -1,8 +1,11 @@
 import { Bot } from "./bot.js";
+import { EjectedMass } from "./ejected.js";
 import { Food } from "./food.js";
 import { Player } from "./player.js";
+import { Virus } from "./virus.js";
 import {
   START_MASS,
+  VIRUS_TRIGGER_MASS,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   canEat,
@@ -20,10 +23,13 @@ const deathScreen = document.querySelector("#death-screen");
 const startForm = document.querySelector("#start-form");
 const playerNameInput = document.querySelector("#player-name");
 const respawnButton = document.querySelector("#respawn-button");
+const splitButton = document.querySelector("#split-button");
+const feedButton = document.querySelector("#feed-button");
 const finalMass = document.querySelector("#final-mass");
 const hud = document.querySelector("#hud");
 const massValue = document.querySelector("#mass-value");
 const rankValue = document.querySelector("#rank-value");
+const cellValue = document.querySelector("#cell-value");
 const leaderboard = document.querySelector("#leaderboard");
 
 const BOT_NAMES = [
@@ -31,8 +37,10 @@ const BOT_NAMES = [
   "Ziggy", "Luma", "Taro", "Kiwi", "Echo", "Pebble", "Miso", "Toast", "Comet"
 ];
 
-const FOOD_COUNT = 650;
+const FOOD_COUNT = 720;
 const BOT_COUNT = 18;
+const VIRUS_COUNT = 22;
+const MAX_EJECTED = 240;
 
 let width = window.innerWidth;
 let height = window.innerHeight;
@@ -45,6 +53,8 @@ let leaderboardClock = 0;
 const pointer = { x: width / 2, y: height / 2 };
 const food = Array.from({ length: FOOD_COUNT }, () => new Food());
 const bots = [];
+const viruses = [];
+const ejectedMasses = [];
 const player = new Player({ name: "Blob", isHuman: true, color: "#9cff57" });
 
 function createBots() {
@@ -56,6 +66,11 @@ function createBots() {
       color: randomColor()
     }));
   }
+}
+
+function createViruses() {
+  viruses.length = 0;
+  for (let i = 0; i < VIRUS_COUNT; i += 1) viruses.push(new Virus());
 }
 
 function resize() {
@@ -70,18 +85,22 @@ function resize() {
 
 function resetArena() {
   for (const pellet of food) pellet.reset();
+  ejectedMasses.length = 0;
   createBots();
+  createViruses();
 
   const name = (playerNameInput.value || "Blob").trim().slice(0, 18) || "Blob";
   player.reset({ name, mass: START_MASS, color: "#9cff57" });
   zoom = 1;
   pointer.x = width / 2;
   pointer.y = height / 2;
+  updateHud();
 }
 
 function startGame() {
   resetArena();
   running = true;
+  lastTime = performance.now();
   startScreen.hidden = true;
   deathScreen.hidden = true;
   hud.hidden = false;
@@ -89,9 +108,9 @@ function startGame() {
 }
 
 function endGame() {
+  if (!running) return;
   running = false;
-  player.alive = false;
-  finalMass.textContent = Math.round(player.mass).toLocaleString();
+  finalMass.textContent = Math.round(player.totalMass).toLocaleString();
   deathScreen.hidden = false;
 }
 
@@ -101,96 +120,202 @@ function respawnBot(bot) {
     mass: randomRange(28, 110),
     color: randomColor()
   });
+  bot.splitCooldownUntil = performance.now() + 1200;
 }
 
-function getBlobs() {
+function getActors() {
   return [player, ...bots];
 }
 
-function consumeFood(blob) {
-  if (!blob.alive) return;
-  const reach = blob.radius + 7;
-  const reach2 = reach * reach;
+function playerTargetVector() {
+  return { x: pointer.x - width / 2, y: pointer.y - height / 2 };
+}
 
-  for (const pellet of food) {
-    if (distanceSquared(blob, pellet) <= reach2) {
-      blob.grow(pellet.value);
-      pellet.reset();
+function splitPlayer() {
+  if (!running) return;
+  const target = playerTargetVector();
+  player.split(target.x, target.y, performance.now());
+}
+
+function feedPlayer() {
+  if (!running) return;
+  const target = playerTargetVector();
+  const emitted = player.eject(target.x, target.y, performance.now());
+  for (const data of emitted) ejectedMasses.push(new EjectedMass(data));
+  if (ejectedMasses.length > MAX_EJECTED) ejectedMasses.splice(0, ejectedMasses.length - MAX_EJECTED);
+}
+
+function consumeFood(actor) {
+  for (const cell of actor.cells) {
+    const reach = cell.radius + 7;
+    const reach2 = reach * reach;
+
+    for (const pellet of food) {
+      if (distanceSquared(cell, pellet) <= reach2) {
+        cell.grow(pellet.value);
+        pellet.reset();
+      }
+    }
+  }
+}
+
+function updateEjected(deltaMs, now) {
+  for (const mass of ejectedMasses) mass.update(deltaMs);
+
+  for (let i = ejectedMasses.length - 1; i >= 0; i -= 1) {
+    const mass = ejectedMasses[i];
+    let consumed = false;
+
+    for (const virus of viruses) {
+      const reach = virus.radius + mass.radius * 0.65;
+      if (distanceSquared(virus, mass) <= reach * reach) {
+        const spawned = virus.feed(mass);
+        ejectedMasses.splice(i, 1);
+        if (spawned && viruses.length < 42) viruses.push(spawned);
+        consumed = true;
+        break;
+      }
+    }
+
+    if (consumed) continue;
+
+    for (const actor of getActors()) {
+      if (!actor.alive) continue;
+      if (actor.id === mass.ownerId && now - mass.bornAt < 650) continue;
+
+      for (const cell of actor.cells) {
+        const capture = Math.max(5, cell.radius - mass.radius * 0.15);
+        if (distanceSquared(cell, mass) <= capture * capture) {
+          cell.grow(mass.mass * 0.9);
+          ejectedMasses.splice(i, 1);
+          consumed = true;
+          break;
+        }
+      }
+
+      if (consumed) break;
+    }
+  }
+}
+
+function resolveVirusCollisions(now) {
+  for (const virus of viruses) {
+    let triggered = false;
+
+    for (const actor of getActors()) {
+      if (!actor.alive) continue;
+
+      for (const cell of [...actor.cells]) {
+        if (cell.mass < VIRUS_TRIGGER_MASS) continue;
+        const capture = Math.max(8, cell.radius - virus.radius * 0.18);
+
+        if (distanceSquared(cell, virus) <= capture * capture) {
+          actor.explodeOnVirus(cell, now);
+          virus.reset();
+          triggered = true;
+          break;
+        }
+      }
+
+      if (triggered) break;
     }
   }
 }
 
 function resolveBlobCollisions() {
-  const blobs = getBlobs();
+  const actors = getActors();
 
-  for (let i = 0; i < blobs.length; i += 1) {
-    for (let j = i + 1; j < blobs.length; j += 1) {
-      const a = blobs[i];
-      const b = blobs[j];
-      if (!a.alive || !b.alive) continue;
+  for (let i = 0; i < actors.length; i += 1) {
+    const actorA = actors[i];
+    if (!actorA.alive) continue;
 
-      let eater = null;
-      let prey = null;
+    for (let j = i + 1; j < actors.length; j += 1) {
+      const actorB = actors[j];
+      if (!actorB.alive) continue;
 
-      if (canEat(a, b)) {
-        eater = a;
-        prey = b;
-      } else if (canEat(b, a)) {
-        eater = b;
-        prey = a;
+      for (const a of [...actorA.cells]) {
+        if (!actorA.cells.includes(a)) continue;
+
+        for (const b of [...actorB.cells]) {
+          if (!actorB.cells.includes(b)) continue;
+
+          if (canEat(a, b)) {
+            a.grow(b.mass * 0.82);
+            actorB.removeCell(b);
+          } else if (canEat(b, a)) {
+            b.grow(a.mass * 0.82);
+            actorA.removeCell(a);
+            break;
+          }
+        }
       }
-
-      if (!eater || !prey) continue;
-
-      eater.grow(prey.mass * 0.82);
-      prey.alive = false;
-
-      if (prey === player) {
-        endGame();
-        return;
-      }
-
-      respawnBot(prey);
     }
+  }
+
+  if (!player.alive) {
+    endGame();
+    return;
+  }
+
+  for (const bot of bots) {
+    if (!bot.alive) respawnBot(bot);
   }
 }
 
-function update(deltaMs) {
+function calculateCameraZoom() {
+  if (!player.alive) return zoom;
+  const massZoom = clamp(1.12 / Math.pow(Math.max(START_MASS, player.totalMass) / START_MASS, 0.13), 0.32, 1.08);
+  const center = player.center;
+  let spread = 0;
+
+  for (const cell of player.cells) {
+    spread = Math.max(spread, Math.hypot(cell.x - center.x, cell.y - center.y) + cell.radius);
+  }
+
+  const spreadZoom = clamp(Math.min(width, height) / Math.max(420, spread * 2.8), 0.28, 1.08);
+  return Math.min(massZoom, spreadZoom);
+}
+
+function update(deltaMs, now) {
   if (!running) return;
 
-  player.setTargetVector(pointer.x - width / 2, pointer.y - height / 2);
-  player.update(deltaMs);
+  const target = playerTargetVector();
+  player.update(deltaMs, target.x, target.y, now);
 
-  const blobs = getBlobs();
-  for (const bot of bots) bot.updateAI(food, blobs, deltaMs);
+  const actors = getActors();
+  for (const bot of bots) bot.updateAI(food, actors, viruses, deltaMs, now);
+  for (const virus of viruses) virus.update(deltaMs);
 
-  for (const blob of blobs) consumeFood(blob);
+  updateEjected(deltaMs, now);
+  for (const actor of actors) consumeFood(actor);
+  resolveVirusCollisions(now);
   resolveBlobCollisions();
 
-  const targetZoom = clamp(1.12 / Math.pow(player.mass / START_MASS, 0.13), 0.42, 1.08);
+  const targetZoom = calculateCameraZoom();
   zoom += (targetZoom - zoom) * Math.min(1, deltaMs * 0.0045);
 
   leaderboardClock += deltaMs;
-  if (leaderboardClock >= 180) {
+  if (leaderboardClock >= 160) {
     leaderboardClock = 0;
     updateHud();
   }
 }
 
 function updateHud() {
-  const ranking = getBlobs()
-    .filter((blob) => blob.alive)
-    .sort((a, b) => b.mass - a.mass);
+  const ranking = getActors()
+    .filter((actor) => actor.alive)
+    .sort((a, b) => b.totalMass - a.totalMass);
 
   const playerRank = Math.max(1, ranking.indexOf(player) + 1);
-  massValue.textContent = Math.round(player.mass).toLocaleString();
+  massValue.textContent = Math.round(player.totalMass).toLocaleString();
   rankValue.textContent = `#${playerRank}`;
+  cellValue.textContent = player.cells.length.toString();
 
   leaderboard.replaceChildren();
-  ranking.slice(0, 8).forEach((blob) => {
+  ranking.slice(0, 8).forEach((actor) => {
     const item = document.createElement("li");
-    item.textContent = `${blob.name} · ${Math.round(blob.mass)}`;
-    if (blob === player) item.classList.add("is-player");
+    item.textContent = `${actor.name} · ${Math.round(actor.totalMass)}`;
+    if (actor === player) item.classList.add("is-player");
     leaderboard.appendChild(item);
   });
 }
@@ -200,15 +325,17 @@ function drawBackground() {
   ctx.fillStyle = "#0b1020";
   ctx.fillRect(0, 0, width, height);
 
+  const camera = player.alive ? player.center : { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 };
+
   ctx.save();
   ctx.translate(width / 2, height / 2);
   ctx.scale(zoom, zoom);
-  ctx.translate(-player.x, -player.y);
+  ctx.translate(-camera.x, -camera.y);
 
-  const left = clamp(player.x - width / (2 * zoom) - 160, 0, WORLD_WIDTH);
-  const right = clamp(player.x + width / (2 * zoom) + 160, 0, WORLD_WIDTH);
-  const top = clamp(player.y - height / (2 * zoom) - 160, 0, WORLD_HEIGHT);
-  const bottom = clamp(player.y + height / (2 * zoom) + 160, 0, WORLD_HEIGHT);
+  const left = clamp(camera.x - width / (2 * zoom) - 180, 0, WORLD_WIDTH);
+  const right = clamp(camera.x + width / (2 * zoom) + 180, 0, WORLD_WIDTH);
+  const top = clamp(camera.y - height / (2 * zoom) - 180, 0, WORLD_HEIGHT);
+  const bottom = clamp(camera.y + height / (2 * zoom) + 180, 0, WORLD_HEIGHT);
 
   const grid = 120;
   ctx.lineWidth = 1 / zoom;
@@ -235,14 +362,32 @@ function drawBackground() {
     if (pellet.x > left && pellet.x < right && pellet.y > top && pellet.y < bottom) pellet.draw(ctx);
   }
 
-  const drawOrder = getBlobs().filter((blob) => blob.alive).sort((a, b) => a.radius - b.radius);
-  for (const blob of drawOrder) blob.draw(ctx, zoom);
+  for (const mass of ejectedMasses) {
+    if (mass.x > left && mass.x < right && mass.y > top && mass.y < bottom) mass.draw(ctx, zoom);
+  }
+
+  for (const virus of viruses) {
+    if (virus.x + virus.radius > left && virus.x - virus.radius < right && virus.y + virus.radius > top && virus.y - virus.radius < bottom) {
+      virus.draw(ctx, zoom);
+    }
+  }
+
+  const cellEntries = [];
+  for (const actor of getActors()) {
+    const largest = actor.largestCell;
+    for (const cell of actor.cells) cellEntries.push({ actor, cell, isLargest: cell === largest });
+  }
+  cellEntries.sort((a, b) => a.cell.radius - b.cell.radius);
+
+  for (const { actor, cell, isLargest } of cellEntries) {
+    cell.draw(ctx, zoom, isLargest ? actor.name : "", isLargest);
+  }
 
   ctx.restore();
 }
 
 function drawMinimap() {
-  if (!running) return;
+  if (!running || !player.alive) return;
 
   const mapSize = Math.min(104, width * 0.22);
   const margin = 16;
@@ -255,8 +400,9 @@ function drawMinimap() {
   ctx.strokeStyle = "rgba(255,255,255,.14)";
   ctx.strokeRect(x, y, mapSize, mapSize);
 
-  const px = x + (player.x / WORLD_WIDTH) * mapSize;
-  const py = y + (player.y / WORLD_HEIGHT) * mapSize;
+  const center = player.center;
+  const px = x + (center.x / WORLD_WIDTH) * mapSize;
+  const py = y + (center.y / WORLD_HEIGHT) * mapSize;
   ctx.beginPath();
   ctx.arc(px, py, 3.5, 0, Math.PI * 2);
   ctx.fillStyle = "#9cff57";
@@ -271,7 +417,7 @@ function render() {
 function frame(now) {
   const deltaMs = Math.min(40, now - lastTime || 16.667);
   lastTime = now;
-  update(deltaMs);
+  update(deltaMs, now);
   render();
   requestAnimationFrame(frame);
 }
@@ -285,6 +431,30 @@ window.addEventListener("resize", resize);
 canvas.addEventListener("pointermove", updatePointer);
 canvas.addEventListener("pointerdown", updatePointer);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+document.addEventListener("keydown", (event) => {
+  if (!running || event.repeat) return;
+
+  if (event.code === "Space") {
+    event.preventDefault();
+    splitPlayer();
+  } else if (event.code === "KeyW") {
+    event.preventDefault();
+    feedPlayer();
+  }
+});
+
+splitButton.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  splitPlayer();
+});
+
+feedButton.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  feedPlayer();
+});
 
 startForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -302,5 +472,6 @@ if (savedName) playerNameInput.value = savedName.slice(0, 18);
 
 resize();
 createBots();
+createViruses();
 updateHud();
 requestAnimationFrame(frame);

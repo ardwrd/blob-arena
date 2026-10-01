@@ -1,24 +1,40 @@
 # Blob Arena
 
-A lightweight browser arena game where blobs grow, hunt, and survive.
+A lightweight browser arena game inspired by the eat-grow-split loop of Agar-style games, built with plain HTML, CSS, JavaScript, and Canvas.
 
-Blob Arena is a small Agar-like experiment built with plain HTML, CSS, JavaScript, and Canvas. The first version is intentionally client-side only: no account, database, framework, or game server is required.
-
-## V1
+## V2 gameplay
 
 - Pointer and touch movement
 - Large scrolling arena with camera zoom
 - Food pellets and growth
-- AI-controlled enemy blobs
+- Multi-cell player model
+- **SPACE** to split toward the pointer
+- Split momentum and delayed merging
+- Maximum 16 cells
+- **W** to eject / feed mass
+- Ejected mass can be eaten by players, bots, or viruses
+- Green viruses act as cover for small cells
+- Cells at roughly 132+ mass can swallow a virus and explode into multiple cells
+- Feeding a virus repeatedly makes it launch another virus
+- AI bots hunt, flee, split-attack, eat, and avoid dangerous viruses
 - Eat-or-be-eaten collision rules
-- Live leaderboard
-- Death and instant respawn
-- Responsive desktop and mobile controls
+- Edge/corner capture handling
+- Live leaderboard based on total mass
+- Death and respawn
+- Responsive desktop and mobile action buttons
 - Runs entirely in the browser
+
+## Controls
+
+| Action | Desktop | Touch |
+| --- | --- | --- |
+| Move | Pointer | Drag / move touch |
+| Split | `Space` | `SPLIT` button |
+| Feed / eject mass | `W` | `FEED` button |
 
 ## Run locally
 
-Because the game uses JavaScript modules, serve the repository with any small static server instead of opening `index.html` directly.
+Because the game uses JavaScript modules, serve the repository with a small static server instead of opening `index.html` directly.
 
 ```bash
 python -m http.server 8080
@@ -32,9 +48,13 @@ Then open `http://localhost:8080`.
 - CSS
 - Vanilla JavaScript (ES modules)
 
+## Architecture
+
+The player and bots are actors that can own multiple independent cells. Each cell has its own mass, radius, position, split momentum, and merge timer. Persistent multiplayer state is intentionally out of scope for this version.
+
 ## Roadmap
 
-Possible later experiments: split mechanics, eject mass, smarter bots, skins, power-ups, multiplayer rooms, and server-authoritative gameplay.
+Possible later experiments: smarter tactical bots, skins, custom game modes, spectator mode, multiplayer rooms, and server-authoritative gameplay.
 
 ## License
 

@@ -43,12 +43,33 @@ export function keepInsideWorld(blob) {
   blob.y = clamp(blob.y, r, WORLD_HEIGHT - r);
 }
 
+function isPinnedToWorldEdge(blob, epsilon = 2) {
+  const r = blob.radius;
+  return (
+    blob.x <= r + epsilon ||
+    blob.x >= WORLD_WIDTH - r - epsilon ||
+    blob.y <= r + epsilon ||
+    blob.y >= WORLD_HEIGHT - r - epsilon
+  );
+}
+
 export function canEat(eater, prey) {
   if (!eater.alive || !prey.alive || eater === prey) return false;
   if (eater.mass < prey.mass * 1.12) return false;
 
+  const d2 = distanceSquared(eater, prey);
   const captureRadius = Math.max(eater.radius * 0.74, eater.radius - prey.radius * 0.28);
-  return distanceSquared(eater, prey) < captureRadius * captureRadius;
+  if (d2 < captureRadius * captureRadius) return true;
+
+  // A smaller blob can otherwise become impossible to engulf when both blobs
+  // are clamped against the same arena edge/corner. At the boundary, allow a
+  // capture once the prey is already substantially overlapped by the eater.
+  if (isPinnedToWorldEdge(eater) || isPinnedToWorldEdge(prey)) {
+    const edgeCaptureRadius = eater.radius + prey.radius * 0.15;
+    return d2 < edgeCaptureRadius * edgeCaptureRadius;
+  }
+
+  return false;
 }
 
 export function randomColor() {

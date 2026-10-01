@@ -14,7 +14,8 @@ export class EjectedMass {
   }
 
   get radius() {
-    return Math.max(5, massToRadius(this.mass) * 0.42);
+    // Keep ejected mass visually distinct from normal food pellets.
+    return Math.max(9, massToRadius(this.mass) * 0.78);
   }
 
   update(deltaMs) {

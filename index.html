@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Blob Arena is a lightweight browser arena game where blobs grow, hunt, and survive.">
+  <meta name="theme-color" content="#0b1020">
+  <title>Blob Arena</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="game" aria-label="Blob Arena game canvas"></canvas>
+
+  <div class="hud" id="hud" hidden>
+    <div class="hud-card stats-card">
+      <span class="hud-label">MASS</span>
+      <strong id="mass-value">42</strong>
+      <span class="hud-separator">/</span>
+      <span class="hud-label">RANK</span>
+      <strong id="rank-value">#1</strong>
+    </div>
+
+    <div class="hud-card leaderboard-card">
+      <div class="leaderboard-title">TOP BLOBS</div>
+      <ol id="leaderboard"></ol>
+    </div>
+
+    <div class="control-hint">Move pointer or touch to steer</div>
+  </div>
+
+  <section class="overlay" id="start-screen">
+    <div class="panel">
+      <p class="eyebrow">BROWSER ARENA</p>
+      <h1>BLOB<br>ARENA</h1>
+      <p class="lede">Eat pellets. Grow bigger. Hunt smaller blobs. Avoid everything larger than you.</p>
+
+      <form id="start-form" class="start-form">
+        <label for="player-name">Nickname</label>
+        <input id="player-name" name="player-name" maxlength="18" autocomplete="nickname" placeholder="Blob" value="Blob">
+        <button type="submit">ENTER ARENA</button>
+      </form>
+
+      <p class="fine-print">Single-player V1 · bots only · no account · no server</p>
+    </div>
+  </section>
+
+  <section class="overlay" id="death-screen" hidden>
+    <div class="panel panel-small">
+      <p class="eyebrow danger">YOU GOT EATEN</p>
+      <h2>Back to blob size.</h2>
+      <p class="death-copy">Final mass: <strong id="final-mass">0</strong></p>
+      <button id="respawn-button" type="button">RESPAWN</button>
+    </div>
+  </section>
+
+  <script type="module" src="./js/game.js"></script>
+</body>
+</html>

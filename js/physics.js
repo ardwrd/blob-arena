@@ -1,5 +1,5 @@
-export const WORLD_WIDTH = 5200;
-export const WORLD_HEIGHT = 5200;
+export const WORLD_WIDTH = 7000;
+export const WORLD_HEIGHT = 7000;
 export const START_MASS = 42;
 export const MAX_CELLS = 16;
 export const SPLIT_MIN_MASS = 36;

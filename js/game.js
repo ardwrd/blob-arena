@@ -34,12 +34,13 @@ const leaderboard = document.querySelector("#leaderboard");
 
 const BOT_NAMES = [
   "Byte", "Mochi", "Nova", "Pixel", "Orbit", "Boba", "Mango", "Noodle", "Pico",
-  "Ziggy", "Luma", "Taro", "Kiwi", "Echo", "Pebble", "Miso", "Toast", "Comet"
+  "Ziggy", "Luma", "Taro", "Kiwi", "Echo", "Pebble", "Miso", "Toast", "Comet",
+  "Yuzu", "Kumo", "Sora", "Bean", "Puff", "Ringo", "Koda", "Mika"
 ];
 
-const FOOD_COUNT = 1200;
-const BOT_COUNT = 18;
-const VIRUS_COUNT = 22;
+const FOOD_COUNT = 2200;
+const BOT_COUNT = 26;
+const VIRUS_COUNT = 30;
 const MAX_EJECTED = 240;
 
 let width = window.innerWidth;

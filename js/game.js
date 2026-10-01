@@ -36,6 +36,12 @@ const leaderboard = document.querySelector("#leaderboard");
 const cheatPanel = document.querySelector("#cheat-panel");
 const cheatClose = document.querySelector("#cheat-close");
 const cheatButtons = [...document.querySelectorAll("[data-cheat]")];
+const graphicsButton = document.querySelector("#graphics-button");
+const graphicsPanel = document.querySelector("#graphics-panel");
+const graphicsClose = document.querySelector("#graphics-close");
+const graphicsQuality = document.querySelector("#graphics-quality");
+const graphicsScale = document.querySelector("#graphics-scale");
+const graphicsToggles = [...document.querySelectorAll("[data-graphics]")];
 
 const BOT_NAMES = [
   "Byte", "Mochi", "Nova", "Pixel", "Orbit", "Boba", "Mango", "Noodle", "Pico",
@@ -47,12 +53,35 @@ const FOOD_COUNT = 8000;
 const BOT_COUNT = 200;
 const VIRUS_COUNT = 40;
 const MAX_EJECTED = 240;
+const MAX_FEED_PARTICLES = 520;
 const FOOD_GRID_SIZE = 320;
 const BOT_FOOD_SCAN_RADIUS = 760;
+const FEED_INTERVAL = 105;
+const GRAPHICS_STORAGE_KEY = "blob-arena-graphics";
+
+const GRAPHICS_PRESETS = {
+  low: { dprCap: 1, grid: false, particles: false, glow: false, names: true },
+  medium: { dprCap: 1.25, grid: true, particles: false, glow: false, names: true },
+  high: { dprCap: 1.75, grid: true, particles: true, glow: false, names: true },
+  ultra: { dprCap: 2, grid: true, particles: true, glow: true, names: true }
+};
+
+function loadGraphicsState() {
+  const fallback = { quality: "high", ...GRAPHICS_PRESETS.high };
+  try {
+    const saved = JSON.parse(localStorage.getItem(GRAPHICS_STORAGE_KEY) || "null");
+    if (!saved || !GRAPHICS_PRESETS[saved.quality]) return fallback;
+    return { ...fallback, ...saved, dprCap: GRAPHICS_PRESETS[saved.quality].dprCap };
+  } catch {
+    return fallback;
+  }
+}
+
+const graphicsState = loadGraphicsState();
 
 let width = window.innerWidth;
 let height = window.innerHeight;
-let dpr = Math.min(2, window.devicePixelRatio || 1);
+let dpr = 1;
 let running = false;
 let arenaInitialized = false;
 let lastTime = performance.now();
@@ -60,6 +89,8 @@ let zoom = 1;
 let leaderboardClock = 0;
 let lastPlayerRank = BOT_COUNT + 1;
 let lastPlayerMass = START_MASS;
+let feedHeld = false;
+let nextFeedAt = 0;
 
 const cheatState = {
   godMode: false,
@@ -72,9 +103,38 @@ const foodGrid = new SpatialGrid(FOOD_GRID_SIZE);
 const bots = [];
 const viruses = [];
 const ejectedMasses = [];
+const feedParticles = [];
 const player = new Player({ name: "Blob", isHuman: true, color: "#9cff57" });
 
 foodGrid.rebuild(food);
+
+function saveGraphicsState() {
+  localStorage.setItem(GRAPHICS_STORAGE_KEY, JSON.stringify({
+    quality: graphicsState.quality,
+    grid: graphicsState.grid,
+    particles: graphicsState.particles,
+    glow: graphicsState.glow,
+    names: graphicsState.names
+  }));
+}
+
+function syncGraphicsUi() {
+  graphicsQuality.value = graphicsState.quality;
+  for (const input of graphicsToggles) {
+    input.checked = Boolean(graphicsState[input.dataset.graphics]);
+  }
+  graphicsScale.textContent = `${dpr.toFixed(2)}×`;
+}
+
+function applyGraphicsPreset(name) {
+  const preset = GRAPHICS_PRESETS[name] || GRAPHICS_PRESETS.high;
+  graphicsState.quality = GRAPHICS_PRESETS[name] ? name : "high";
+  Object.assign(graphicsState, preset);
+  if (!graphicsState.particles) feedParticles.length = 0;
+  saveGraphicsState();
+  resize();
+  syncGraphicsUi();
+}
 
 function createBots() {
   bots.length = 0;
@@ -97,17 +157,19 @@ function createViruses() {
 function resize() {
   width = window.innerWidth;
   height = window.innerHeight;
-  dpr = Math.min(2, window.devicePixelRatio || 1);
+  dpr = Math.min(graphicsState.dprCap, window.devicePixelRatio || 1);
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
+  if (graphicsScale) graphicsScale.textContent = `${dpr.toFixed(2)}×`;
 }
 
 function resetArena() {
   for (const pellet of food) pellet.reset();
   foodGrid.rebuild(food);
   ejectedMasses.length = 0;
+  feedParticles.length = 0;
   createBots();
   createViruses();
 
@@ -116,6 +178,7 @@ function resetArena() {
   arenaInitialized = true;
   lastPlayerMass = START_MASS;
   zoom = 1;
+  feedHeld = false;
   pointer.x = width / 2;
   pointer.y = height / 2;
   updateHud();
@@ -127,6 +190,8 @@ function respawnPlayer() {
   running = true;
   lastTime = performance.now();
   lastPlayerMass = START_MASS;
+  zoom = 1;
+  feedHeld = false;
   deathScreen.hidden = true;
   hud.hidden = false;
   pointer.x = width / 2;
@@ -147,6 +212,7 @@ function startGame() {
 function endGame() {
   if (!running) return;
   running = false;
+  feedHeld = false;
   finalMass.textContent = Math.round(lastPlayerMass).toLocaleString();
   finalRank.textContent = `#${lastPlayerRank}`;
   massValue.textContent = Math.round(lastPlayerMass).toLocaleString();
@@ -178,12 +244,66 @@ function splitPlayer() {
   player.split(target.x, target.y, performance.now());
 }
 
-function feedPlayer() {
-  if (!running) return;
+function spawnFeedParticles(mass) {
+  if (!graphicsState.particles) return;
+  const count = graphicsState.quality === "ultra" ? 2 : 1;
+  const speed = Math.max(1, Math.hypot(mass.vx, mass.vy));
+  const nx = mass.vx / speed;
+  const ny = mass.vy / speed;
+
+  for (let i = 0; i < count; i += 1) {
+    feedParticles.push({
+      x: mass.x - nx * randomRange(4, 12),
+      y: mass.y - ny * randomRange(4, 12),
+      vx: -nx * randomRange(0.8, 2.3) + randomRange(-0.7, 0.7),
+      vy: -ny * randomRange(0.8, 2.3) + randomRange(-0.7, 0.7),
+      life: randomRange(180, 320),
+      maxLife: randomRange(180, 320),
+      size: randomRange(1.5, 3.2),
+      color: mass.color
+    });
+  }
+
+  if (feedParticles.length > MAX_FEED_PARTICLES) {
+    feedParticles.splice(0, feedParticles.length - MAX_FEED_PARTICLES);
+  }
+}
+
+function feedPlayer(now = performance.now()) {
+  if (!running) return 0;
   const target = playerTargetVector();
-  const emitted = player.eject(target.x, target.y, performance.now());
-  for (const data of emitted) ejectedMasses.push(new EjectedMass(data));
-  if (ejectedMasses.length > MAX_EJECTED) ejectedMasses.splice(0, ejectedMasses.length - MAX_EJECTED);
+  const emitted = player.eject(target.x, target.y, now);
+
+  for (const data of emitted) {
+    const mass = new EjectedMass(data);
+    ejectedMasses.push(mass);
+    spawnFeedParticles(mass);
+  }
+
+  if (ejectedMasses.length > MAX_EJECTED) {
+    ejectedMasses.splice(0, ejectedMasses.length - MAX_EJECTED);
+  }
+
+  return emitted.length;
+}
+
+function updateFeedParticles(deltaMs) {
+  if (!feedParticles.length) return;
+  const frameScale = Math.min(2.4, deltaMs / 16.667);
+
+  for (let i = feedParticles.length - 1; i >= 0; i -= 1) {
+    const particle = feedParticles[i];
+    particle.life -= deltaMs;
+    if (particle.life <= 0) {
+      feedParticles.splice(i, 1);
+      continue;
+    }
+
+    particle.x += particle.vx * frameScale;
+    particle.y += particle.vy * frameScale;
+    particle.vx *= Math.pow(0.94, frameScale);
+    particle.vy *= Math.pow(0.94, frameScale);
+  }
 }
 
 function consumeFood(actor) {
@@ -226,10 +346,10 @@ function updateEjected(deltaMs, now) {
 
     for (const actor of getActors()) {
       if (!actor.alive) continue;
-      if (actor.id === mass.ownerId && now - mass.bornAt < 650) continue;
+      if (actor.id === mass.ownerId && now - mass.bornAt < 760) continue;
 
       for (const cell of actor.cells) {
-        const capture = Math.max(5, cell.radius - mass.radius * 0.15);
+        const capture = Math.max(5, cell.radius - mass.radius * 0.12);
         if (distanceSquared(cell, mass) <= capture * capture) {
           cell.grow(mass.mass * 0.9);
           ejectedMasses.splice(i, 1);
@@ -324,13 +444,8 @@ function calculateCameraZoom() {
     spread = Math.max(spread, Math.hypot(cell.x - center.x, cell.y - center.y) + cell.radius);
   }
 
-  // Mass keeps the normal Agar-like pullback, but no longer stops at 0.32.
   const massZoom = clamp(1.08 / Math.pow(massRatio, 0.22), 0.035, 1.08);
-
-  // Keep the biggest cell around 46% of the short side so huge blobs still leave room to see threats.
   const cellZoom = clamp((viewportShort * 0.23) / largestRadius, 0.035, 1.08);
-
-  // Multi-cell spreads can occupy more space than the largest individual cell.
   const spreadZoom = clamp(viewportShort / Math.max(420, spread * 3.15), 0.035, 1.08);
 
   return Math.min(massZoom, cellZoom, spreadZoom);
@@ -338,6 +453,11 @@ function calculateCameraZoom() {
 
 function update(deltaMs, now) {
   if (!running) return;
+
+  if (feedHeld && now >= nextFeedAt) {
+    feedPlayer(now);
+    nextFeedAt = now + FEED_INTERVAL;
+  }
 
   const target = playerTargetVector();
   player.update(deltaMs, target.x, target.y, now);
@@ -353,6 +473,7 @@ function update(deltaMs, now) {
   for (const virus of viruses) virus.update(deltaMs);
 
   updateEjected(deltaMs, now);
+  updateFeedParticles(deltaMs);
   for (const actor of actors) consumeFood(actor);
   resolveVirusCollisions(now);
   resolveBlobCollisions();
@@ -396,6 +517,21 @@ function updateHud() {
   });
 }
 
+function drawFeedParticles(left, top, right, bottom) {
+  if (!graphicsState.particles) return;
+
+  for (const particle of feedParticles) {
+    if (particle.x < left || particle.x > right || particle.y < top || particle.y > bottom) continue;
+    const alpha = Math.max(0, particle.life / particle.maxLife);
+    ctx.globalAlpha = alpha * 0.52;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.size / Math.max(0.25, zoom), 0, Math.PI * 2);
+    ctx.fillStyle = particle.color;
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawBackground() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = "#0b1020";
@@ -413,22 +549,24 @@ function drawBackground() {
   const top = clamp(camera.y - height / (2 * zoom) - 180, 0, WORLD_HEIGHT);
   const bottom = clamp(camera.y + height / (2 * zoom) + 180, 0, WORLD_HEIGHT);
 
-  const grid = 120;
-  ctx.lineWidth = 1 / zoom;
-  ctx.strokeStyle = "rgba(255,255,255,.045)";
-  ctx.beginPath();
+  if (graphicsState.grid) {
+    const grid = 120;
+    ctx.lineWidth = 1 / zoom;
+    ctx.strokeStyle = "rgba(255,255,255,.045)";
+    ctx.beginPath();
 
-  for (let x = Math.floor(left / grid) * grid; x <= right; x += grid) {
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
+    for (let x = Math.floor(left / grid) * grid; x <= right; x += grid) {
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+    }
+
+    for (let y = Math.floor(top / grid) * grid; y <= bottom; y += grid) {
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+    }
+
+    ctx.stroke();
   }
-
-  for (let y = Math.floor(top / grid) * grid; y <= bottom; y += grid) {
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-  }
-
-  ctx.stroke();
 
   ctx.lineWidth = 5 / zoom;
   ctx.strokeStyle = "rgba(156,255,87,.28)";
@@ -438,25 +576,51 @@ function drawBackground() {
     if (pellet.x > left && pellet.x < right && pellet.y > top && pellet.y < bottom) pellet.draw(ctx);
   }
 
+  drawFeedParticles(left, top, right, bottom);
+
   for (const mass of ejectedMasses) {
-    if (mass.x > left && mass.x < right && mass.y > top && mass.y < bottom) mass.draw(ctx, zoom);
+    if (mass.x > left && mass.x < right && mass.y > top && mass.y < bottom) {
+      mass.draw(ctx, zoom, { glow: graphicsState.glow, pulse: graphicsState.quality !== "low" });
+    }
   }
 
   for (const virus of viruses) {
     if (virus.x + virus.radius > left && virus.x - virus.radius < right && virus.y + virus.radius > top && virus.y - virus.radius < bottom) {
-      virus.draw(ctx, zoom);
+      if (graphicsState.glow) {
+        ctx.save();
+        ctx.shadowBlur = Math.min(24, 9 / Math.max(0.08, zoom));
+        ctx.shadowColor = "rgba(112,224,0,.72)";
+        virus.draw(ctx, zoom);
+        ctx.restore();
+      } else {
+        virus.draw(ctx, zoom);
+      }
     }
   }
 
   const cellEntries = [];
   for (const actor of getActors()) {
     const largest = actor.largestCell;
-    for (const cell of actor.cells) cellEntries.push({ actor, cell, isLargest: cell === largest });
+    for (const cell of actor.cells) {
+      if (cell.x + cell.radius < left || cell.x - cell.radius > right || cell.y + cell.radius < top || cell.y - cell.radius > bottom) continue;
+      cellEntries.push({ actor, cell, isLargest: cell === largest });
+    }
   }
   cellEntries.sort((a, b) => a.cell.radius - b.cell.radius);
 
   for (const { actor, cell, isLargest } of cellEntries) {
-    cell.draw(ctx, zoom, isLargest ? actor.name : "", isLargest);
+    const label = graphicsState.names && isLargest ? actor.name : "";
+    const showMass = graphicsState.names && isLargest;
+
+    if (graphicsState.glow) {
+      ctx.save();
+      ctx.shadowBlur = Math.min(24, 9 / Math.max(0.08, zoom));
+      ctx.shadowColor = cell.color;
+      cell.draw(ctx, zoom, label, showMass);
+      ctx.restore();
+    } else {
+      cell.draw(ctx, zoom, label, showMass);
+    }
   }
 
   ctx.restore();
@@ -515,6 +679,14 @@ function setCheatToggle(name, active) {
 function toggleCheatPanel(force) {
   const shouldOpen = typeof force === "boolean" ? force : cheatPanel.hidden;
   cheatPanel.hidden = !shouldOpen;
+  if (shouldOpen) toggleGraphicsPanel(false);
+}
+
+function toggleGraphicsPanel(force) {
+  const shouldOpen = typeof force === "boolean" ? force : graphicsPanel.hidden;
+  graphicsPanel.hidden = !shouldOpen;
+  graphicsButton.setAttribute("aria-expanded", String(shouldOpen));
+  if (shouldOpen) cheatPanel.hidden = true;
 }
 
 function addMass(amount) {
@@ -550,29 +722,52 @@ canvas.addEventListener("pointerdown", updatePointer);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 document.addEventListener("keydown", (event) => {
-  if (event.repeat) return;
-
   if (event.code === "Insert" || event.key === "Insert") {
+    if (event.repeat) return;
     event.preventDefault();
     toggleCheatPanel();
     return;
   }
 
-  if (event.code === "Escape" && !cheatPanel.hidden) {
+  if (event.code === "KeyG") {
+    if (event.repeat) return;
     event.preventDefault();
-    toggleCheatPanel(false);
+    toggleGraphicsPanel();
     return;
+  }
+
+  if (event.code === "Escape") {
+    if (!graphicsPanel.hidden) {
+      event.preventDefault();
+      toggleGraphicsPanel(false);
+      return;
+    }
+    if (!cheatPanel.hidden) {
+      event.preventDefault();
+      toggleCheatPanel(false);
+      return;
+    }
   }
 
   if (!running) return;
 
   if (event.code === "Space") {
+    if (event.repeat) return;
     event.preventDefault();
     splitPlayer();
   } else if (event.code === "KeyW") {
     event.preventDefault();
-    feedPlayer();
+    if (!feedHeld) {
+      feedHeld = true;
+      const now = performance.now();
+      feedPlayer(now);
+      nextFeedAt = now + FEED_INTERVAL;
+    }
   }
+});
+
+document.addEventListener("keyup", (event) => {
+  if (event.code === "KeyW") feedHeld = false;
 });
 
 splitButton.addEventListener("pointerdown", (event) => {
@@ -584,13 +779,35 @@ splitButton.addEventListener("pointerdown", (event) => {
 feedButton.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  feedPlayer();
+  if (!feedHeld) {
+    feedHeld = true;
+    const now = performance.now();
+    feedPlayer(now);
+    nextFeedAt = now + FEED_INTERVAL;
+  }
 });
+
+window.addEventListener("pointerup", () => { feedHeld = false; });
+window.addEventListener("pointercancel", () => { feedHeld = false; });
+window.addEventListener("blur", () => { feedHeld = false; });
 
 cheatClose.addEventListener("click", () => toggleCheatPanel(false));
 cheatPanel.addEventListener("pointerdown", (event) => event.stopPropagation());
 for (const button of cheatButtons) {
   button.addEventListener("click", () => runCheat(button.dataset.cheat));
+}
+
+graphicsButton.addEventListener("click", () => toggleGraphicsPanel());
+graphicsClose.addEventListener("click", () => toggleGraphicsPanel(false));
+graphicsPanel.addEventListener("pointerdown", (event) => event.stopPropagation());
+graphicsQuality.addEventListener("change", () => applyGraphicsPreset(graphicsQuality.value));
+for (const input of graphicsToggles) {
+  input.addEventListener("change", () => {
+    graphicsState[input.dataset.graphics] = input.checked;
+    if (!graphicsState.particles) feedParticles.length = 0;
+    saveGraphicsState();
+    syncGraphicsUi();
+  });
 }
 
 startForm.addEventListener("submit", (event) => {
@@ -605,12 +822,14 @@ respawnButton.addEventListener("click", () => {
 
 document.addEventListener("visibilitychange", () => {
   lastTime = performance.now();
+  if (document.hidden) feedHeld = false;
 });
 
 const savedName = localStorage.getItem("blob-arena-name");
 if (savedName) playerNameInput.value = savedName.slice(0, 18);
 
 resize();
+syncGraphicsUi();
 createBots();
 createViruses();
 updateHud();

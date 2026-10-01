@@ -8,11 +8,14 @@
   <title>Blob Arena</title>
   <link rel="stylesheet" href="./style.css?v=2">
   <link rel="stylesheet" href="./cheat.css?v=1">
+  <link rel="stylesheet" href="./graphics.css?v=1">
 </head>
 <body>
   <canvas id="game" aria-label="Blob Arena game canvas"></canvas>
 
   <div class="hud" id="hud" hidden>
+    <button id="graphics-button" class="graphics-button" type="button" aria-expanded="false">GRAPHICS</button>
+
     <div class="hud-card stats-card">
       <span class="hud-label">MASS</span>
       <strong id="mass-value">42</strong>
@@ -29,7 +32,7 @@
       <ol id="leaderboard"></ol>
     </div>
 
-    <div class="control-hint">SPACE split · W feed · INSERT cheats · green viruses split large cells</div>
+    <div class="control-hint">SPACE split · hold W feed · G graphics · INSERT cheats · green viruses split large cells</div>
 
     <div class="action-controls" aria-label="Game actions">
       <button id="feed-button" type="button" aria-label="Feed mass">
@@ -40,6 +43,35 @@
       </button>
     </div>
   </div>
+
+  <aside class="graphics-panel" id="graphics-panel" hidden aria-label="Graphics settings">
+    <div class="graphics-header">
+      <div>
+        <p class="graphics-eyebrow">DISPLAY SETTINGS</p>
+        <h2>GRAPHICS</h2>
+      </div>
+      <button id="graphics-close" class="graphics-close" type="button" aria-label="Close graphics settings">×</button>
+    </div>
+
+    <label class="graphics-field">
+      <span>QUALITY PRESET</span>
+      <select id="graphics-quality">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="ultra">Ultra</option>
+      </select>
+    </label>
+
+    <div class="graphics-toggles">
+      <label><span>GRID</span><input type="checkbox" data-graphics="grid"></label>
+      <label><span>PARTICLES</span><input type="checkbox" data-graphics="particles"></label>
+      <label><span>GLOW</span><input type="checkbox" data-graphics="glow"></label>
+      <label><span>NAMES</span><input type="checkbox" data-graphics="names"></label>
+    </div>
+
+    <p class="graphics-meta"><span>Render scale</span><strong id="graphics-scale">1.00×</strong></p>
+  </aside>
 
   <aside class="cheat-panel" id="cheat-panel" hidden aria-label="Cheat panel">
     <div class="cheat-header">
@@ -66,7 +98,7 @@
     <div class="panel">
       <p class="eyebrow">BROWSER ARENA</p>
       <h1>BLOB<br>ARENA</h1>
-      <p class="lede">Eat pellets. Split to attack. Feed mass with W. Use green viruses as cover when small—and avoid swallowing them when you are large.</p>
+      <p class="lede">Eat pellets. Split to attack. Hold W to stream-feed mass. Use green viruses as cover when small—and avoid swallowing them when you are large.</p>
 
       <form id="start-form" class="start-form">
         <label for="player-name">Nickname</label>
@@ -76,7 +108,7 @@
 
       <div class="mechanic-notes" aria-label="Controls">
         <span><b>SPACE</b> split</span>
-        <span><b>W</b> eject / feed mass</span>
+        <span><b>W</b> hold to eject / feed</span>
         <span><b>VIRUS</b> explodes large cells</span>
       </div>
 

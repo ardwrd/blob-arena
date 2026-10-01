@@ -312,16 +312,28 @@ function resolveBlobCollisions() {
 
 function calculateCameraZoom() {
   if (!player.alive) return zoom;
-  const massZoom = clamp(1.12 / Math.pow(Math.max(START_MASS, player.totalMass) / START_MASS, 0.13), 0.32, 1.08);
+
+  const totalMass = Math.max(START_MASS, player.totalMass);
+  const massRatio = totalMass / START_MASS;
+  const viewportShort = Math.max(320, Math.min(width, height));
+  const largestRadius = Math.max(1, player.largestCell?.radius || 1);
   const center = player.center;
-  let spread = 0;
+  let spread = largestRadius;
 
   for (const cell of player.cells) {
     spread = Math.max(spread, Math.hypot(cell.x - center.x, cell.y - center.y) + cell.radius);
   }
 
-  const spreadZoom = clamp(Math.min(width, height) / Math.max(420, spread * 2.8), 0.28, 1.08);
-  return Math.min(massZoom, spreadZoom);
+  // Mass keeps the normal Agar-like pullback, but no longer stops at 0.32.
+  const massZoom = clamp(1.08 / Math.pow(massRatio, 0.22), 0.035, 1.08);
+
+  // Keep the biggest cell around 46% of the short side so huge blobs still leave room to see threats.
+  const cellZoom = clamp((viewportShort * 0.23) / largestRadius, 0.035, 1.08);
+
+  // Multi-cell spreads can occupy more space than the largest individual cell.
+  const spreadZoom = clamp(viewportShort / Math.max(420, spread * 3.15), 0.035, 1.08);
+
+  return Math.min(massZoom, cellZoom, spreadZoom);
 }
 
 function update(deltaMs, now) {
@@ -348,7 +360,8 @@ function update(deltaMs, now) {
   if (!player.alive) return;
 
   const targetZoom = calculateCameraZoom();
-  zoom += (targetZoom - zoom) * Math.min(1, deltaMs * 0.0045);
+  const zoomResponse = targetZoom < zoom ? 0.011 : 0.0045;
+  zoom += (targetZoom - zoom) * Math.min(1, deltaMs * zoomResponse);
 
   leaderboardClock += deltaMs;
   if (leaderboardClock >= 160) {
